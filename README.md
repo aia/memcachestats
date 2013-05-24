@@ -1,6 +1,6 @@
 ### Memcachestats
 
-Memcacheestats is a library that captures important PostgreSQL statistics.
+Memcachestats is a library that captures important Memcached cluster statistics and pushes metrics to Ganglia.
 
 ### Contributing to memcachestats
  
