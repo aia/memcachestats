@@ -1,0 +1,21 @@
+---
+environments:
+- name: production
+  prefix: prd
+  discovery:
+    host: your discovery host
+    port: port on your discover host
+  gmond:
+    host: gmond host
+    port: port on your gmond host
+    group: memcached
+    
+- name: staging
+  prefix: stg
+  discovery:
+    host: your discovery host
+    port: port on your discover host
+  gmond:
+    host: gmond host
+    port: port on your gmond host
+    group: memcached

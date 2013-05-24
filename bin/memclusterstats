@@ -1,0 +1,181 @@
+#!/usr/bin/env ruby
+
+$LOAD_PATH.unshift File.dirname(__FILE__) + '/../lib'
+
+require 'memcachestats'
+require 'json'
+require 'rest-client'
+require 'gmetric'
+require 'yaml'
+
+@counter_list = {}
+
+def counter_to_gauge(prefix, counter, value)
+  field_name = [prefix, counter].join("_")
+  if @counter_list[field_name].nil?
+    @counter_list[field_name] = value.to_f
+    return 0.0
+  else
+    ret = value.to_f - @counter_list[field_name]
+    @counter_list[field_name] = value.to_f
+    return ret
+  end
+end
+
+def get_memcached_clusters(discovery, port)
+  res = {}
+  begin 
+    if (state = JSON.parse(RestClient.get("http://#{discovery}:#{port}/state"))) #, :symbolize_keys => true))
+      state.each do |service|
+        if service['serviceName'] == "memcached"
+          res[service['serviceType']] ||= []
+          res[service['serviceType']] << {
+            :host => service['properties']['serviceAddress'],
+            :port => service['properties']['servicePort']
+          }
+        end
+      end
+    end
+  rescue
+    return nil
+  end
+  
+  remove_dups = 0
+  
+  if remove_dups
+    res_keys = res.keys
+    res_dups = {}
+  
+    res_keys.each_with_index do |clustera, indexa|
+      next if res_dups[clustera]
+      for indexb in (indexa + 1 .. res_keys.length - 1)
+        clusterb = res_keys[indexb]
+        if res[clusterb].include?(res[clustera][0])
+          res_dups[clusterb] = clustera
+        end
+      end
+    end
+  
+    res_fixes = {}
+  
+    res_dups.each_key do |cluster|
+      res_fixes[res_dups[cluster]] = res_dups[cluster] if res_fixes[res_dups[cluster]].nil?
+      res_fixes[res_dups[cluster]] = [res_fixes[res_dups[cluster]], cluster].join("-")
+      res.delete(cluster)
+    end
+    
+    res_fixes.each_key do |cluster|
+      res[res_fixes[cluster]] = res[cluster]
+      res.delete(cluster)
+    end
+  end
+  
+  return res
+end
+
+def publish_metric(config, publish_host, name, value, slope, units, type)
+  #pp ["publishing", config, publish_host, name, value, slope, units, type]
+  return
+  
+  c_value = (type == 'double') ? value.to_f : value.to_i
+
+  Ganglia::GMetric.send(
+    config['gmond']['host'],
+    config['gmond']['port'], {
+      :name => name,
+      :units => units,
+      :type => type,
+      :value => c_value,
+      :tmax => 60,
+      :dmax => 300,
+      :group => config['gmond']['group'],
+      :slope => slope,
+      :spoof => 1,
+      :hostname => "#{publish_host}:#{publish_host}"
+   })
+end
+
+
+STDOUT.sync = true
+
+usage = <<-USAGE
+  memclusterstats <configuration file>
+USAGE
+
+if !ARGV[0].nil? && File.exists?(ARGV[0])
+  config = YAML.load_file(ARGV[0])
+else
+  puts usage
+  exit
+end
+
+memcache_ds = MemcacheStats.new({})
+
+while (true)
+  config['environments'].each do |environment|
+    env_time_start = Time.now()
+    #clusters = get_memcached_clusters(environment['discovery']['host'], environment['discovery']['port'])
+    
+    while (true)
+      updated_clusters = get_memcached_clusters(environment['discovery']['host'], environment['discovery']['port'])
+      if (updated_clusters)
+         clusters = updated_clusters
+         break
+      elsif (clusters)
+         break
+      else
+         sleep 60
+      end
+    end
+  
+    clusters.each_key do |cluster_name|
+      memcache_ds.stats = {}
+      acc_stats = {}
+
+      time_start = Time.now()
+
+      clusters[cluster_name].each do |node|
+        memcache_ds.get_memcached_stats(node[:host], node[:port])
+
+        memcache_ds.metrics.keys.each do |metric|
+          acc_stats[metric] ||= 0
+          memcache_ds.stats[metric] ||= 0
+          acc_stats[metric] += memcache_ds.stats[metric].to_i
+        end
+      end
+
+      time_mid = Time.now
+      memcache_ds.log.info("Processed #{environment['name']}/#{cluster_name} cluster in #{time_mid - time_start}")
+  
+      memcache_ds.counters.keys.each do |counter|
+        acc_stats[counter] = counter_to_gauge(
+          "#{environment['name']}_#{cluster_name}",
+          counter,
+          acc_stats[counter]
+        )
+      end
+  
+      memcache_ds.add_derived_metrics(acc_stats)
+
+      acc_stats.keys.each do |metric|
+        next if memcache_ds.metrics[metric]['publish'] == 'no'
+        
+        publish_metric(
+          environment,
+          cluster_name,
+          metric,
+          acc_stats[metric],
+          'both',
+          memcache_ds.metrics[metric]['units'],
+          memcache_ds.metrics[metric]['type']
+        )
+      end
+    end
+    
+    env_time_end = Time.now()
+    memcache_ds.log.info("Processed #{environment['name']} environment in #{env_time_end - env_time_start}")
+  end
+  
+  sleep(30)
+
+end
