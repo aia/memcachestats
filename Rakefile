@@ -17,8 +17,8 @@ Jeweler::Tasks.new do |gem|
   gem.name = "memcachestats"
   gem.homepage = "http://github.com/aia/memcachestats"
   gem.license = "MIT"
-  gem.summary = %Q{TODO: one-line summary of your gem}
-  gem.description = %Q{TODO: longer description of your gem}
+  gem.summary = %Q{Memcachestats is a library that captures important Memcached cluster statistics and pushes metrics to Ganglia}
+  gem.description = %Q{Memcachestats is a library that captures important Memcached cluster statistics and pushes metrics to Ganglia }
   gem.email = "artem@veremey.net"
   gem.authors = ["Artem Veremey"]
   # dependencies defined in Gemfile
