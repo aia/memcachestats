@@ -74,9 +74,6 @@ def get_memcached_clusters(discovery, port)
 end
 
 def publish_metric(config, publish_host, name, value, slope, units, type)
-  #pp ["publishing", config, publish_host, name, value, slope, units, type]
-  return
-  
   c_value = (type == 'double') ? value.to_f : value.to_i
 
   Ganglia::GMetric.send(
